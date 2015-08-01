@@ -2,7 +2,6 @@
 #define PID_QUEUE
 
 #include <stdbool.h>
-#include "linkedlist.h"
 #include <linux/slab.h> /* kalloc/kfree */
 
 typedef struct list_node {
