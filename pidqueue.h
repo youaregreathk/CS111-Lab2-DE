@@ -170,7 +170,7 @@ void PushQueue ( pid_t pi,TheQueue_t *tmp)
  */
 pid_t PopQueue (TheQueue_t *ptr)
 {
-    
+    pid_t num;
     vec_node *tmpNode;
     
     
@@ -178,7 +178,7 @@ pid_t PopQueue (TheQueue_t *ptr)
         return -1;
     
     tmpNode = ptr->head;
-    ret = elem->pid;
+    num = tmpNode->pid;
     
     if(ptr->head == ptr->tail)
     {
@@ -189,7 +189,7 @@ pid_t PopQueue (TheQueue_t *ptr)
         ptr->head = ptr->head->next;
     
     kfree(tmpNode);
-    return ret;
+    return num;
 }
 
 void FreeQueue (TheQueue_t *tmp)
