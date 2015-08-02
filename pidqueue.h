@@ -20,6 +20,24 @@ vec_node* Startlist (pid_t pi)
 }
 
 /**
+ * Returns 0 if the element is not found and 1 if it is
+ */
+vec_node* SearchNode ( pid_t pi,vec_node *ptrhd)
+{
+    if(ptrhd == NULL)
+        return NULL;
+    
+    do
+    {
+        if(ptrhd->pid == pi)
+            return ptrhd;
+        
+    } while ((ptrhd = ptrhd->next) != NULL);
+    
+    return NULL;
+}
+
+/**
  * Adds an element to the end of a list and returns a pointer
  * to the head. If the head argument is null, the new element
  * is returned.
@@ -38,6 +56,15 @@ vec_node* AddnodeEd (vec_node *ptrhd, pid_t pi)
     current_node->next = new_node;
     
     return ptrhd;
+}
+
+void MarkNodeVisted ( bool status,vec_node *ptrhd)
+{
+    while(ptrhd != NULL)
+    {
+        ptrhd->visited = status;
+        ptrhd = ptrhd->next;
+    }
 }
 
 /**
@@ -82,7 +109,7 @@ vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
         {
             EdNode->next = CurNode->next;
             kfree(CurNode);
-            return head;
+            return ptrhd;
         }
         
         EdNode = CurNode;
@@ -92,112 +119,95 @@ vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
     return ptrhd;
 }
 
-/**
- * Returns 0 if the element is not found and 1 if it is
- */
-vec_node* SearchNode ( pid_t pi,vec_node *ptrhd)
-{
-    if(ptrhd == NULL)
-        return NULL;
-    
-    do
-    {
-        if(ptrhd->pid == pi)
-            return ptrhd;
-        
-    } while ((ptrhd = ptrhd->next) != NULL);
-    
-    return NULL;
-}
+
 
 
 void FreeList (vec_node *ptrhd)
 {
     while (ptrhd != NULL)
     {
-        ptrhd = RemoveNode(ptrhd, head->pid);
+        ptrhd = RemoveNode(ptrhd, ptrhd->pid);
     }
 }
 
-void MarkNodeVisted ( bool status,vec_node *ptrhd)
-{
-    while(ptrhd != NULL)
-    {
-        ptrhd->visited = status;
-        ptrhd = ptrhd->next;
-    }
-}
+
 //End of Linklist.h
 //************************************************************************************
-typedef struct pid_queue {
-    vec_node *head;
+typedef struct TheQueue {
     vec_node *tail;
-} pid_queue_t;
-
-pid_queue_t* pid_queue_init (void)
-{
-    pid_queue_t *q = kmalloc(sizeof(pid_queue_t), GFP_ATOMIC);
-    q->head = NULL;
-    q->tail = NULL;
+    vec_node *head;
     
-    return q;
+} TheQueue_t;
+
+TheQueue_t* StartQueue (void)
+{
+    TheQueue_t *ptr = kmalloc(sizeof(TheQueue_t), GFP_ATOMIC);
+    ptr->tail = NULL;
+    ptr->head = NULL;
+    
+    return ptr;
 }
 
 /* Returns 1 if the queue has elements, 0 if empty */
-bool pid_queue_empty (pid_queue_t *q)
+bool isQueueEmpty (TheQueue_t *ptr)
 {
-    if(q->head == NULL)
+    if(ptr->head == NULL)
         return true;
-    
-    return false;
+    else
+        return false;
 }
 
-void pid_queue_push (pid_queue_t *q, pid_t p)
+void PushQueue ( pid_t pi,TheQueue_t *tmp)
 {
-    if(q->head == NULL)
-        q->head = q->tail = AddnodeEd(NULL, p);
+    if(tmp->head == NULL)
+        tmp->head = tmp->tail = AddnodeEd(NULL, pi);
     else
-        q->tail = AddnodeEd(q->tail, p)->next;
+        tmp->tail = AddnodeEd(tmp->tail, pi)->next;
 }
 
 /**
  * Pops an element from the queue.
  */
-pid_t pid_queue_pop (pid_queue_t *q)
+pid_t PopQueue (TheQueue_t *ptr)
 {
-    vec_node *elem;
-    pid_t ret;
     
-    if(q->head == NULL)
+    vec_node *tmpNode;
+    
+    
+    if(ptr->head == NULL)
         return -1;
     
-    elem = q->head;
+    tmpNode = ptr->head;
     ret = elem->pid;
     
-    if(q->head == q->tail)
-        q->head = q->tail = NULL;
+    if(ptr->head == ptr->tail)
+    {
+        ptr->head = NULL;
+        ptr->tail = NULL;
+    }
     else
-        q->head = q->head->next;
+        ptr->head = ptr->head->next;
     
-    kfree(elem);
+    kfree(tmpNode);
     return ret;
 }
 
-void pid_queue_remove_all (pid_queue_t *q)
+void FreeQueue (TheQueue_t *tmp)
 {
-    freeList(q->head);
-    q->head = q->tail = NULL;
+    FreeList(tmp->head);
+    tmp->head =NULL;
+    tmp->tail = NULL;
 }
 
-void pid_queue_add_elements_from_list (pid_queue_t *q, vec_node *head)
+void AddnodefromListtoQueue ( vec_node *ptrhd,TheQueue_t *tmp)
 {
     
-    if(q == NULL || head == NULL)
+    if(  ptrhd == NULL|| tmp == NULL)
         return;
     
     do
     {
-        pid_queue_push(q, head->pid);
-    } while ((head = head->next) != NULL);
+        PushQueue( ptrhd->pid,tmp);
+    } while ((ptrhd = ptrhd->next) != NULL);
 }
 #endif // PID_QUEUE

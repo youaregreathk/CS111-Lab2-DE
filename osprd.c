@@ -350,12 +350,12 @@ static int find_drive_id_for_waiter (pid_t p)
 
 static bool check_deadlock (osprd_info_t *d)
 {
-    pid_queue_t *q;
+    TheQueue_t *q;
     int i, d_id = drive_id_from_info(d);
     bool ret = false;
     pid_t pid = -1;
     
-    q = pid_queue_init();
+    q = StartQueue();
     
     for(;;)
     {
@@ -369,14 +369,14 @@ static bool check_deadlock (osprd_info_t *d)
             }
             
             spin_lock(&d->mutex);
-            pid_queue_add_elements_from_list(q, osprds[d_id].lock_holder_l);
+            AddnodefromListtoQueue( osprds[d_id].lock_holder_l,q);
             spin_unlock(&d->mutex);
         }
         
-        if(pid_queue_empty(q))
+        if(isQueueEmpty(q))
             break;
         
-        pid = pid_queue_pop(q);
+        pid = PopQueue(q);
         d_id = find_drive_id_for_waiter(pid);
     }
     
@@ -388,7 +388,7 @@ static bool check_deadlock (osprd_info_t *d)
         spin_unlock(&(osprds[i].mutex));
     }
     
-    pid_queue_remove_all(q);
+    FreeQueue(q);
     kfree(q);
     
     return ret;
