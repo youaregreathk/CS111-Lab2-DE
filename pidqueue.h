@@ -185,7 +185,7 @@ pid_t pid_queue_pop (pid_queue_t *q)
 
 void pid_queue_remove_all (pid_queue_t *q)
 {
-    freeList(q->head);
+    FreeList(q->head);
     q->head = q->tail = NULL;
 }
 
