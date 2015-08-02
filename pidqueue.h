@@ -2,18 +2,17 @@
 #define PID_QUEUE
 
 #include <stdbool.h>
-#include "linkedlist.h"
 #include <linux/slab.h> /* kalloc/kfree */
 
-typedef struct list_node {
+typedef struct list_node {                        //list_node struct
     pid_t pid;
     struct list_node* next;
     bool visited;
-} list_node_t;
+} vec_node;
 
-list_node_t* list_init (pid_t p)
+vec_node* list_init (pid_t p)
 {
-    list_node_t *new_node = kmalloc(sizeof(list_node_t), GFP_ATOMIC);
+    vec_node *new_node = kmalloc(sizeof(vec_node), GFP_ATOMIC);
     new_node->pid = p;
     new_node->next = NULL;
     new_node->visited = false;
@@ -26,10 +25,10 @@ list_node_t* list_init (pid_t p)
  * to the head. If the head argument is null, the new element
  * is returned.
  */
-list_node_t* list_add_to_back (list_node_t *head, pid_t p)
+vec_node* list_add_to_back (vec_node *head, pid_t p)
 {
-    list_node_t *current_node = head;
-    list_node_t *new_node = list_init(p);
+    vec_node *current_node = head;
+    vec_node *new_node = list_init(p);
     
     if(current_node == NULL)
         return new_node;
@@ -46,9 +45,9 @@ list_node_t* list_add_to_back (list_node_t *head, pid_t p)
  * Creates a new element and set's its next pointer to the
  * specified head. Returns a pointer to the new element
  */
-list_node_t* list_add_to_front (list_node_t *head, pid_t p)
+vec_node* list_add_to_front (vec_node *head, pid_t p)
 {
-    list_node_t *new_node = list_init(p);
+    vec_node *new_node = list_init(p);
     new_node->next = head;
     
     return new_node;
@@ -59,9 +58,9 @@ list_node_t* list_add_to_front (list_node_t *head, pid_t p)
  * that element is removed from the list and the list's head
  * (unchanged or new head) is returned
  */
-list_node_t* list_remove_element (list_node_t *head, pid_t p)
+vec_node* list_remove_element (vec_node *head, pid_t p)
 {
-    list_node_t *current_node, *last_node;
+    vec_node *current_node, *last_node;
     
     if(head == NULL)
         return NULL;
@@ -94,7 +93,7 @@ list_node_t* list_remove_element (list_node_t *head, pid_t p)
 /**
  * Returns 0 if the element is not found and 1 if it is
  */
-list_node_t* list_contains (list_node_t *head, pid_t p)
+vec_node* list_contains (vec_node *head, pid_t p)
 {
     if(head == NULL)
         return NULL;
@@ -109,13 +108,13 @@ list_node_t* list_contains (list_node_t *head, pid_t p)
     return NULL;
 }
 
-void list_free_all (list_node_t *head)
+void list_free_all (vec_node *head)
 {
     while (head != NULL)
         head = list_remove_element(head, head->pid);
 }
 
-void list_mark_visited (list_node_t *head, bool status)
+void list_mark_visited (vec_node *head, bool status)
 {
     while(head != NULL)
     {
@@ -126,34 +125,34 @@ void list_mark_visited (list_node_t *head, bool status)
 //End of Linklist.h
 //************************************************************************************
 typedef struct pid_queue {
-	list_node_t *head;
-	list_node_t *tail;
+    vec_node *head;
+    vec_node *tail;
 } pid_queue_t;
 
 pid_queue_t* pid_queue_init (void)
 {
-	pid_queue_t *q = kmalloc(sizeof(pid_queue_t), GFP_ATOMIC);
-	q->head = NULL;
-	q->tail = NULL;
-
-	return q;
+    pid_queue_t *q = kmalloc(sizeof(pid_queue_t), GFP_ATOMIC);
+    q->head = NULL;
+    q->tail = NULL;
+    
+    return q;
 }
 
 /* Returns 1 if the queue has elements, 0 if empty */
 bool pid_queue_empty (pid_queue_t *q)
 {
-	if(q->head == NULL)
-		return true;
-
-	return false;
+    if(q->head == NULL)
+        return true;
+    
+    return false;
 }
 
 void pid_queue_push (pid_queue_t *q, pid_t p)
 {
-	if(q->head == NULL)
-		q->head = q->tail = list_add_to_back(NULL, p);
-	else
-		q->tail = list_add_to_back(q->tail, p)->next;
+    if(q->head == NULL)
+        q->head = q->tail = list_add_to_back(NULL, p);
+    else
+        q->tail = list_add_to_back(q->tail, p)->next;
 }
 
 /**
@@ -161,39 +160,39 @@ void pid_queue_push (pid_queue_t *q, pid_t p)
  */
 pid_t pid_queue_pop (pid_queue_t *q)
 {
-	list_node_t *elem;
-	pid_t ret;
-
-	if(q->head == NULL)
-		return -1;
-
-	elem = q->head;
-	ret = elem->pid;
-
-	if(q->head == q->tail)
-		q->head = q->tail = NULL;
-	else
-		q->head = q->head->next;
-
-	kfree(elem);
-	return ret;
+    vec_node *elem;
+    pid_t ret;
+    
+    if(q->head == NULL)
+        return -1;
+    
+    elem = q->head;
+    ret = elem->pid;
+    
+    if(q->head == q->tail)
+        q->head = q->tail = NULL;
+    else
+        q->head = q->head->next;
+    
+    kfree(elem);
+    return ret;
 }
 
 void pid_queue_remove_all (pid_queue_t *q)
 {
-	list_free_all(q->head);
-	q->head = q->tail = NULL;
+    list_free_all(q->head);
+    q->head = q->tail = NULL;
 }
 
-void pid_queue_add_elements_from_list (pid_queue_t *q, list_node_t *head)
+void pid_queue_add_elements_from_list (pid_queue_t *q, vec_node *head)
 {
-
-	if(q == NULL || head == NULL)
-		return;
-
-	do
-	{
-		pid_queue_push(q, head->pid);
-	} while ((head = head->next) != NULL);
+    
+    if(q == NULL || head == NULL)
+        return;
+    
+    do
+    {
+        pid_queue_push(q, head->pid);
+    } while ((head = head->next) != NULL);
 }
 #endif // PID_QUEUE
