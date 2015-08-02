@@ -82,7 +82,7 @@ vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
         {
             EdNode->next = CurNode->next;
             kfree(CurNode);
-            return head;
+            return ptrhd;
         }
         
         EdNode = CurNode;
@@ -115,7 +115,7 @@ void FreeList (vec_node *ptrhd)
 {
     while (ptrhd != NULL)
     {
-        ptrhd = RemoveNode(ptrhd, head->pid);
+        ptrhd = RemoveNode(ptrhd, ptrhd->pid);
     }
 }
 
