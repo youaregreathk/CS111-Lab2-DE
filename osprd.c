@@ -268,7 +268,7 @@ static int release_file_lock(struct file *filp)
             else if(d->ticket_head > d->ticket_tail)
                 d->ticket_head = 0;
             
-            d->lock_holder_l = list_remove_element(d->lock_holder_l, current->pid);
+            d->lock_holder_l = RemoveNode(d->lock_holder_l, current->pid);
             spin_unlock(&d->mutex);
             
             // Clear the file's locked bit
@@ -308,7 +308,7 @@ static int try_acquire_file_lock(struct file *filp)
         d->num_read_locks++;
     
     // Add the process to the holder's list
-    d->lock_holder_l = list_add_to_front(d->lock_holder_l, current->pid);
+    d->lock_holder_l = AddnodeFd(d->lock_holder_l, current->pid);
     
     spin_unlock(&d->mutex);
     filp->f_flags |= F_OSPRD_LOCKED;
@@ -321,7 +321,7 @@ static bool current_has_lock_on_disk (int d_id)
     osprd_info_t *d = &osprds[d_id];
     
     spin_lock(&d->mutex);
-    result = list_contains(d->lock_holder_l, current->pid);
+    result = SearchNode( current->pid,d->lock_holder_l);
     spin_unlock(&d->mutex);
     
     return result ? true : false;
@@ -334,7 +334,7 @@ static int find_drive_id_for_waiter (pid_t p)
     for(i = 0; i < NOSPRD; i++)
     {
         spin_lock(&(osprds[i].mutex));
-        elem = list_contains(osprds[i].lock_waiter_l, p);
+        elem = SearchNode( p,osprds[i].lock_waiter_l);
         spin_unlock(&(osprds[i].mutex));
         
         if(elem && elem->visited == false)
@@ -384,7 +384,7 @@ static bool check_deadlock (osprd_info_t *d)
     for(i = 0; i < NOSPRD; i++)
     {
         spin_lock(&(osprds[i].mutex));
-        list_mark_visited(osprds[i].lock_waiter_l, false);
+        MarkNodeVisted( false,osprds[i].lock_waiter_l);
         spin_unlock(&(osprds[i].mutex));
     }
     
@@ -457,13 +457,13 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             spin_lock(&d->mutex);
             d->ticket_tail++;
             local_ticket = d->ticket_tail;
-            d->lock_waiter_l = list_add_to_front(d->lock_waiter_l, current->pid);
+            d->lock_waiter_l = AddnodeFd(d->lock_waiter_l, current->pid);
             spin_unlock(&d->mutex);
             
             wait_event_interruptible(d->blockq, d->ticket_head == local_ticket || d->num_to_requeue > 0);
             
             spin_lock(&d->mutex);
-            d->lock_waiter_l = list_remove_element(d->lock_waiter_l, current->pid);
+            d->lock_waiter_l = RemoveNode(d->lock_waiter_l, current->pid);
             spin_unlock(&d->mutex);
             
             // process any pending signals by re-queueing everything
@@ -666,8 +666,8 @@ static void cleanup_device(osprd_info_t *d)
     if (d->data)
         vfree(d->data);
     
-    list_free_all(d->lock_holder_l);
-    list_free_all(d->lock_waiter_l);
+    FreeList(d->lock_holder_l);
+    FreeList(d->lock_waiter_l);
     d->lock_holder_l = NULL;
     d->lock_waiter_l = NULL;
 }
