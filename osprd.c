@@ -47,311 +47,6 @@ MODULE_AUTHOR("Phil Crumm and Ivan Petkov");
 static int nsectors = 32;
 module_param(nsectors, int, 0);
 
-
-/* The internal representation of our device. */
-typedef struct osprd_info {
-    uint8_t *data;                  // The data array. Its size is
-    // (nsectors * SECTOR_SIZE) bytes.
-    
-    osp_spinlock_t mutex;           // Mutex for synchronizing access to
-    // this block device
-    
-    unsigned ticket_head;		// Currently running ticket for
-    // the device lock
-    
-    unsigned ticket_tail;		// Next available ticket for
-    // the device lock
-    
-    wait_queue_head_t blockq;       // Wait queue for tasks blocked on
-    // the device lock
-    
-    /* HINT: You may want to add additional fields to help
-     in detecting deadlock. */
-    vec_node *lock_holder_l;
-    vec_node *lock_waiter_l;
-    
-    // If a signal wakes a process in the queue, we re-queue everything for simplicity.
-    int num_to_requeue;
-    
-    unsigned num_read_locks;
-    unsigned num_write_locks;
-    
-    // The following elements are used internally; you don't need
-    // to understand them.
-    struct request_queue *queue;    // The device request queue.
-    spinlock_t qlock;		// Used internally for mutual
-    //   exclusion in the 'queue'.
-    struct gendisk *gd;             // The generic disk.
-} osprd_info_t;
-
-#define NOSPRD 4
-static osprd_info_t osprds[NOSPRD];
-
-/**
- * Helper functions for dealing with deadlock handling and detection
- */
-
-// Declare useful helper functions
-
-/*
- * file2osprd(filp)
- *   Given an open file, check whether that file corresponds to an OSP ramdisk.
- *   If so, return a pointer to the ramdisk's osprd_info_t.
- *   If not, return NULL.
- */
-static osprd_info_t *file2osprd(struct file *filp);
-
-/**
- * Given a file struct, returns the drive ID of the "file"
- */
-int DriveId (osprd_info_t *d)
-{
-    int x=0;
-    for (; x < NOSPRD; x++)
-    {
-        if (&osprds[x] == d)
-        {
-            return x;
-        }
-    }
-    
-    // If we get here, we have a serious problem
-    eprintk("The device is unrecognized");
-    return -1;
-    
-}
-
-/*
- * for_each_open_file(task, callback, user_data)
- *   Given a task, call the function 'callback' once for each of 'task's open
- *   files.  'callback' is called as 'callback(filp, user_data)'; 'filp' is
- *   the open file, and 'user_data' is copied from for_each_open_file's third
- *   argument.
- */
-static void for_each_open_file(struct task_struct *task,
-                               void (*callback)(struct file *filp,
-                                                osprd_info_t *user_data),
-                               osprd_info_t *user_data);
-
-/**
- * Releases any read/write lock for a given file
- * and modifies the relevant osprd_info_t as appropriate and clears
- * F_OSPRD_LOCKED from filp->f_flags. If the file was locked, the entire
- * wait queue is woken up after the lock is removed.
- *
- * returns 0 on success
- * return -EINVAL if filp is NULL or is not locked
- */
-static int Release_LLock(struct file *filp);
-
-/**
- * Tries to acquire a lock for a file given that there are no locking
- * conflicts with the disk.
- *
- * returns 0 on success
- * returns -EBUSY if another lock is already in place
- * returns -EDEADLK if the process already has a lock
- */
-static int try_acquire_file_lock(struct file *filp);
-
-/*
- * osprd_process_request(d, req)
- *   Called when the user reads or writes a sector.
- *   Should perform the read or write, as appropriate.
- */
-static void osprd_process_request(osprd_info_t *d, struct request *req)
-{
-    size_t offset;
-    size_t num_bytes;
-    
-    if (!blk_fs_request(req)) {
-        end_request(req, 0);
-        return;
-    }
-    
-    // EXERCISE: Perform the read or write request by copying data between
-    // our data array and the request's buffer.
-    // Hint: The 'struct request' argument tells you what kind of request
-    // this is, and which sectors are being read or written.
-    // Read about 'struct request' in <linux/blkdev.h>.
-    // Consider the 'req->sector', 'req->current_nr_sectors', and
-    // 'req->buffer' members, and the rq_data_dir() function.
-    
-    if (req->sector < 0 || req->sector >= nsectors)
-    {
-        // sector_t is defined as an unsigned long in <linux/types.h>
-        eprintk("Invalid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
-        end_request(req, 0);
-    }
-    
-    offset = req->sector * SECTOR_SIZE;
-    
-    // If the number of requested sectors would reach the end of the disk
-    // use as many sectors as possible until the end is reached
-    if(req->sector + req->current_nr_sectors > nsectors)
-    {
-        num_bytes = (nsectors - req->sector) * SECTOR_SIZE;
-        eprintk("Requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
-        eprintk("Using [%u] additional sectors instead.\n", num_bytes / SECTOR_SIZE);
-    }
-    else
-    {
-        num_bytes = req->current_nr_sectors * SECTOR_SIZE;
-    }
-    
-    // According to http://www.makelinux.net/ldd3/chp-16-sect-3
-    // it is save to dereference req->buffer and write to it.
-    
-    // Note from @ipetkov: I'm not sure if req->buffer needs to
-    // be resized at all, I'm assuming linux will allocate the
-    // memory before the request is sent. No issues are apparent
-    // from the first 8 default test cases.
-    spin_lock(&d->mutex);
-    
-    if(rq_data_dir(req) == READ)
-        memcpy(req->buffer, d->data + offset, num_bytes);
-    else // WRITE
-        memcpy(d->data + offset, req->buffer, num_bytes);
-    
-    spin_unlock(&d->mutex);
-    
-    end_request(req, 1);
-}
-
-
-// This function is called when a /dev/osprdX file is opened.
-// You aren't likely to need to change this.
-static int osprd_open(struct inode *inode, struct file *filp)
-{
-    // Always set the O_SYNC flag. That way, we will get writes immediately
-    // instead of waiting for them to get through write-back caches.
-    filp->f_flags |= O_SYNC;
-    return 0;
-}
-
-
-// This function is called when a /dev/osprdX file is finally closed.
-// (If the file descriptor was dup2ed, this function is called only when the
-// last copy is closed.)
-static int osprd_close_last(struct inode *inode, struct file *filp)
-{
-    // EXERCISE: If the user closes a ramdisk file that holds
-    // a lock, release the lock.  Also wake up blocked processes
-    // as appropriate.
-    
-    Release_LLock(filp);
-    
-    return 0;
-}
-
-
-/*
- * osprd_lock
- */
-static int Release_LLock(struct file *tmpfile)
-{
-    if (tmpfile) {
-        osprd_info_t *d = file2osprd(tmpfile);
-        int filp_writable = tmpfile->f_mode & FMODE_WRITE;
-        int filp_locked = tmpfile->f_flags & F_OSPRD_LOCKED;
-        
-        if(filp_locked)
-        {
-            spin_lock(&d->mutex);
-            
-            if(filp_writable)
-                d->num_write_locks--;
-            else // file open for reading
-                d->num_read_locks--;
-            
-            // Set the head to the next ticket so that some process may respond
-            // Check for overflows, if the tail wraps around to 0, move the head to 0 as well.
-            if(d->ticket_head < d->ticket_tail)
-                d->ticket_head++;
-            else if(d->ticket_head > d->ticket_tail)
-                d->ticket_head = 0;
-            
-            d->lock_holder_l = RemoveNode(d->lock_holder_l, current->pid);
-            spin_unlock(&d->mutex);
-            
-            // Clear the file's locked bit
-            tmpfile->f_flags &= ~F_OSPRD_LOCKED;
-            
-            wake_up_all(&d->blockq);
-            return 0;
-        }
-    }
-    
-    return -EINVAL;
-}
-
-static int try_acquire_file_lock(struct file *filp)
-{
-    osprd_info_t *d = file2osprd(filp);
-    int filp_writable = filp->f_mode & FMODE_WRITE;
-    
-    // Check that this flag doesn't already have a lock
-    if(filp->f_flags & F_OSPRD_LOCKED)
-        return -EDEADLK;
-    
-    spin_lock(&d->mutex);
-    
-    // We cannot grab the disk if there is any write lock
-    // or if the caller wishes to write and someone else is reading
-    if(d->num_write_locks > 0 || (filp_writable && d->num_read_locks > 0))
-    {
-        spin_unlock(&d->mutex);
-        return -EBUSY;
-    }
-    
-    // Grab the lock!
-    if(filp_writable)
-        d->num_write_locks++;
-    else // readable
-        d->num_read_locks++;
-    
-    // Add the process to the holder's list
-    d->lock_holder_l = AddnodeFd(d->lock_holder_l, current->pid);
-    
-    spin_unlock(&d->mutex);
-    filp->f_flags |= F_OSPRD_LOCKED;
-    return 0;
-}
-
-static bool current_has_lock_on_disk (int d_id)
-{
-    vec_node *result;
-    osprd_info_t *d = &osprds[d_id];
-    
-    spin_lock(&d->mutex);
-    result = SearchNode( current->pid,d->lock_holder_l);
-    spin_unlock(&d->mutex);
-    
-    return result ? true : false;
-}
-
-static int find_drive_id_for_waiter (pid_t p)
-{
-    int i;
-    vec_node *elem = NULL;
-    for(i = 0; i < NOSPRD; i++)
-    {
-        spin_lock(&(osprds[i].mutex));
-        elem = SearchNode( p,osprds[i].lock_waiter_l);
-        spin_unlock(&(osprds[i].mutex));
-        
-        if(elem && elem->visited == false)
-        {
-            elem->visited = true;
-            return i;
-        }
-    }
-    
-    // If we get here, we've visited the node before
-    return -1;
-}
-
-
 /*********************************************************************************
  The Linklist Implementation
  
@@ -483,6 +178,311 @@ void FreeList (vec_node *ptrhd)
     }
 }
 
+
+/* The internal representation of our device. */
+typedef struct osprd_info {
+    uint8_t *data;                  // The data array. Its size is
+    // (nsectors * SECTOR_SIZE) bytes.
+    
+    osp_spinlock_t mutex;           // Mutex for synchronizing access to
+    // this block device
+    
+    unsigned ticket_head;		// Currently running ticket for
+    // the device lock
+    
+    unsigned ticket_tail;		// Next available ticket for
+    // the device lock
+    
+    wait_queue_head_t blockq;       // Wait queue for tasks blocked on
+    // the device lock
+    
+    /* HINT: You may want to add additional fields to help
+     in detecting deadlock. */
+    vec_node *lock_holder_l;
+    vec_node *lock_waiter_l;
+    
+    // If a signal wakes a process in the queue, we re-queue everything for simplicity.
+    int num_to_requeue;
+    
+    unsigned num_read_locks;
+    unsigned num_write_locks;
+    
+    // The following elements are used internally; you don't need
+    // to understand them.
+    struct request_queue *queue;    // The device request queue.
+    spinlock_t qlock;		// Used internally for mutual
+    //   exclusion in the 'queue'.
+    struct gendisk *gd;             // The generic disk.
+} osprd_info_t;
+
+#define NOSPRD 4
+static osprd_info_t osprds[NOSPRD];
+
+/**
+ * Helper functions for dealing with deadlock handling and detection
+ */
+
+// Declare useful helper functions
+
+/*
+ * file2osprd(filp)
+ *   Given an open file, check whether that file corresponds to an OSP ramdisk.
+ *   If so, return a pointer to the ramdisk's osprd_info_t.
+ *   If not, return NULL.
+ */
+static osprd_info_t *file2osprd(struct file *filp);
+
+/**
+ * Given a file struct, returns the drive ID of the "file"
+ */
+int drive_id_from_info (osprd_info_t *d)
+{
+    int i;
+    for (i = 0; i < NOSPRD; i++)
+    {
+        if (&osprds[i] == d)
+        {
+            return i;
+        }
+    }
+    
+    // If we get here, we have a serious problem
+    eprintk("Unrecognized device");
+    return -1;
+    
+}
+
+/*
+ * for_each_open_file(task, callback, user_data)
+ *   Given a task, call the function 'callback' once for each of 'task's open
+ *   files.  'callback' is called as 'callback(filp, user_data)'; 'filp' is
+ *   the open file, and 'user_data' is copied from for_each_open_file's third
+ *   argument.
+ */
+static void for_each_open_file(struct task_struct *task,
+                               void (*callback)(struct file *filp,
+                                                osprd_info_t *user_data),
+                               osprd_info_t *user_data);
+
+/**
+ * Releases any read/write lock for a given file
+ * and modifies the relevant osprd_info_t as appropriate and clears
+ * F_OSPRD_LOCKED from filp->f_flags. If the file was locked, the entire
+ * wait queue is woken up after the lock is removed.
+ *
+ * returns 0 on success
+ * return -EINVAL if filp is NULL or is not locked
+ */
+static int release_file_lock(struct file *filp);
+
+/**
+ * Tries to acquire a lock for a file given that there are no locking
+ * conflicts with the disk.
+ *
+ * returns 0 on success
+ * returns -EBUSY if another lock is already in place
+ * returns -EDEADLK if the process already has a lock
+ */
+static int try_acquire_file_lock(struct file *filp);
+
+/*
+ * osprd_process_request(d, req)
+ *   Called when the user reads or writes a sector.
+ *   Should perform the read or write, as appropriate.
+ */
+static void osprd_process_request(osprd_info_t *d, struct request *req)
+{
+    size_t offset;
+    size_t num_bytes;
+    
+    if (!blk_fs_request(req)) {
+        end_request(req, 0);
+        return;
+    }
+    
+    // EXERCISE: Perform the read or write request by copying data between
+    // our data array and the request's buffer.
+    // Hint: The 'struct request' argument tells you what kind of request
+    // this is, and which sectors are being read or written.
+    // Read about 'struct request' in <linux/blkdev.h>.
+    // Consider the 'req->sector', 'req->current_nr_sectors', and
+    // 'req->buffer' members, and the rq_data_dir() function.
+    
+    if (req->sector < 0 || req->sector >= nsectors)
+    {
+        // sector_t is defined as an unsigned long in <linux/types.h>
+        eprintk("Invalid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
+        end_request(req, 0);
+    }
+    
+    offset = req->sector * SECTOR_SIZE;
+    
+    // If the number of requested sectors would reach the end of the disk
+    // use as many sectors as possible until the end is reached
+    if(req->sector + req->current_nr_sectors > nsectors)
+    {
+        num_bytes = (nsectors - req->sector) * SECTOR_SIZE;
+        eprintk("Requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
+        eprintk("Using [%u] additional sectors instead.\n", num_bytes / SECTOR_SIZE);
+    }
+    else
+    {
+        num_bytes = req->current_nr_sectors * SECTOR_SIZE;
+    }
+    
+    // According to http://www.makelinux.net/ldd3/chp-16-sect-3
+    // it is save to dereference req->buffer and write to it.
+    
+    // Note from @ipetkov: I'm not sure if req->buffer needs to
+    // be resized at all, I'm assuming linux will allocate the
+    // memory before the request is sent. No issues are apparent
+    // from the first 8 default test cases.
+    spin_lock(&d->mutex);
+    
+    if(rq_data_dir(req) == READ)
+        memcpy(req->buffer, d->data + offset, num_bytes);
+    else // WRITE
+        memcpy(d->data + offset, req->buffer, num_bytes);
+    
+    spin_unlock(&d->mutex);
+    
+    end_request(req, 1);
+}
+
+
+// This function is called when a /dev/osprdX file is opened.
+// You aren't likely to need to change this.
+static int osprd_open(struct inode *inode, struct file *filp)
+{
+    // Always set the O_SYNC flag. That way, we will get writes immediately
+    // instead of waiting for them to get through write-back caches.
+    filp->f_flags |= O_SYNC;
+    return 0;
+}
+
+
+// This function is called when a /dev/osprdX file is finally closed.
+// (If the file descriptor was dup2ed, this function is called only when the
+// last copy is closed.)
+static int osprd_close_last(struct inode *inode, struct file *filp)
+{
+    // EXERCISE: If the user closes a ramdisk file that holds
+    // a lock, release the lock.  Also wake up blocked processes
+    // as appropriate.
+    
+    release_file_lock(filp);
+    
+    return 0;
+}
+
+
+/*
+ * osprd_lock
+ */
+static int release_file_lock(struct file *filp)
+{
+    if (filp) {
+        osprd_info_t *d = file2osprd(filp);
+        int filp_writable = filp->f_mode & FMODE_WRITE;
+        int filp_locked = filp->f_flags & F_OSPRD_LOCKED;
+        
+        if(filp_locked)
+        {
+            spin_lock(&d->mutex);
+            
+            if(filp_writable)
+                d->num_write_locks--;
+            else // file open for reading
+                d->num_read_locks--;
+            
+            // Set the head to the next ticket so that some process may respond
+            // Check for overflows, if the tail wraps around to 0, move the head to 0 as well.
+            if(d->ticket_head < d->ticket_tail)
+                d->ticket_head++;
+            else if(d->ticket_head > d->ticket_tail)
+                d->ticket_head = 0;
+            
+            d->lock_holder_l = RemoveNode(d->lock_holder_l, current->pid);
+            spin_unlock(&d->mutex);
+            
+            // Clear the file's locked bit
+            filp->f_flags &= ~F_OSPRD_LOCKED;
+            
+            wake_up_all(&d->blockq);
+            return 0;
+        }
+    }
+    
+    return -EINVAL;
+}
+
+static int try_acquire_file_lock(struct file *filp)
+{
+    osprd_info_t *d = file2osprd(filp);
+    int filp_writable = filp->f_mode & FMODE_WRITE;
+    
+    // Check that this flag doesn't already have a lock
+    if(filp->f_flags & F_OSPRD_LOCKED)
+        return -EDEADLK;
+    
+    spin_lock(&d->mutex);
+    
+    // We cannot grab the disk if there is any write lock
+    // or if the caller wishes to write and someone else is reading
+    if(d->num_write_locks > 0 || (filp_writable && d->num_read_locks > 0))
+    {
+        spin_unlock(&d->mutex);
+        return -EBUSY;
+    }
+    
+    // Grab the lock!
+    if(filp_writable)
+        d->num_write_locks++;
+    else // readable
+        d->num_read_locks++;
+    
+    // Add the process to the holder's list
+    d->lock_holder_l = AddnodeFd(d->lock_holder_l, current->pid);
+    
+    spin_unlock(&d->mutex);
+    filp->f_flags |= F_OSPRD_LOCKED;
+    return 0;
+}
+
+static bool current_has_lock_on_disk (int d_id)
+{
+    vec_node *result;
+    osprd_info_t *d = &osprds[d_id];
+    
+    spin_lock(&d->mutex);
+    result = SearchNode( current->pid,d->lock_holder_l);
+    spin_unlock(&d->mutex);
+    
+    return result ? true : false;
+}
+
+static int find_drive_id_for_waiter (pid_t p)
+{
+    int i;
+    vec_node *elem = NULL;
+    for(i = 0; i < NOSPRD; i++)
+    {
+        spin_lock(&(osprds[i].mutex));
+        elem = SearchNode( p,osprds[i].lock_waiter_l);
+        spin_unlock(&(osprds[i].mutex));
+        
+        if(elem && elem->visited == false)
+        {
+            elem->visited = true;
+            return i;
+        }
+    }
+    
+    // If we get here, we've visited the node before
+    return -1;
+}
+
+
 /******************************************************************************
  The Queue Implementation
  
@@ -570,7 +570,7 @@ void AddnodefromListtoQueue ( vec_node *ptrhd,TheQueue_t *tmp)
 static bool check_deadlock (osprd_info_t *d)
 {
     TheQueue_t *q;
-    int i, d_id = DriveId(d);
+    int i, d_id = drive_id_from_info(d);
     bool ret = false;
     pid_t pid = -1;
     
@@ -747,7 +747,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         // the wait queue, perform any additional accounting steps
         // you need, and return 0.
         
-        r = Release_LLock(filp);
+        r = release_file_lock(filp);
         
     } else
         r = -ENOTTY; /* unknown command */
