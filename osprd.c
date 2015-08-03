@@ -432,11 +432,11 @@ static int RequestAcquireLock(struct file *tmpfile)
     
     int istmpfileWrt = tmpfile->f_mode & FMODE_WRITE;
     
-    if(filp->f_flags & F_OSPRD_LOCKED)
+    if(tmpfile->f_flags & F_OSPRD_LOCKED)
     {
         return -EDEADLK;
     }
-    spin_lock(&d->mutex);
+    spin_lock(&ptr->mutex);
     
     // We cannot grab the disk if there is any write lock
     // or if the caller wishes to write and someone else is reading
@@ -468,7 +468,7 @@ static bool isDisknowlocked (int x)
     spin_lock(&tp->mutex);
     
     flag = SearchNode( current->pid,tp->lock_holder_l);
-    spin_unlock(&d->mutex);
+    spin_unlock(&tp->mutex);
     if(flag)
         return true;
     else
