@@ -236,10 +236,10 @@ static osprd_info_t *file2osprd(struct file *filp);
 /**
  * Given a file struct, returns the drive ID of the "file"
  */
-int drive_id_from_info (osprd_info_t *d)
+int Drriveid(osprd_info_t *d)
 {
-    int i;
-    for (i = 0; i < NOSPRD; i++)
+    int i=0;
+    for (; i < NOSPRD; i++)
     {
         if (&osprds[i] == d)
         {
@@ -247,7 +247,6 @@ int drive_id_from_info (osprd_info_t *d)
         }
     }
     
-    // If we get here, we have a serious problem
     eprintk("Unrecognized device");
     return -1;
     
@@ -265,25 +264,7 @@ static void for_each_open_file(struct task_struct *task,
                                                 osprd_info_t *user_data),
                                osprd_info_t *user_data);
 
-/**
- * Releases any read/write lock for a given file
- * and modifies the relevant osprd_info_t as appropriate and clears
- * F_OSPRD_LOCKED from filp->f_flags. If the file was locked, the entire
- * wait queue is woken up after the lock is removed.
- *
- * returns 0 on success
- * return -EINVAL if filp is NULL or is not locked
- */
 
-
-/**
- * Tries to acquire a lock for a file given that there are no locking
- * conflicts with the disk.
- *
- * returns 0 on success
- * returns -EBUSY if another lock is already in place
- * returns -EDEADLK if the process already has a lock
- */
 
 
 /*
@@ -380,10 +361,8 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 }
 
 
-/*
- * osprd_lock
- */
-static int ReleaseLLock(struct file *tmpfile)
+
+static int ReleaseLLock(struct file *tmpfile)             //This funtion release read or write lock for a given file.
 {
     if (tmpfile) {
         osprd_info_t *d = file2osprd(tmpfile);
@@ -399,12 +378,11 @@ static int ReleaseLLock(struct file *tmpfile)
             {
                 d->num_write_locks--;
             }
-            else // file open for reading
+            else
             {
                 d->num_read_locks--;
             }
-            // Set the head to the next ticket so that some process may respond
-            // Check for overflows, if the tail wraps around to 0, move the head to 0 as well.
+            
             if(d->ticket_head < d->ticket_tail)
             {
                 d->ticket_head++;
@@ -416,7 +394,6 @@ static int ReleaseLLock(struct file *tmpfile)
             d->lock_holder_l = RemoveNode(d->lock_holder_l, current->pid);
             spin_unlock(&d->mutex);
             
-            // Clear the file's locked bit
             tmpfile->f_flags &= ~F_OSPRD_LOCKED;
             
             wake_up_all(&d->blockq);
@@ -427,7 +404,9 @@ static int ReleaseLLock(struct file *tmpfile)
     return -EINVAL;
 }
 
-static int RequestAcquireLock(struct file *tmpfile)
+
+
+static int RequestAcquireLock(struct file *tmpfile)    //This funtion request to acquire a lock for a file that there are no locking
 {
     osprd_info_t *ptr = file2osprd(tmpfile);
     
@@ -439,21 +418,18 @@ static int RequestAcquireLock(struct file *tmpfile)
     }
     spin_lock(&ptr->mutex);
     
-    // We cannot grab the disk if there is any write lock
-    // or if the caller wishes to write and someone else is reading
+    
     if(  (istmpfileWrt && ptr->num_read_locks > 0) || ptr->num_write_locks > 0)
     {
-        spin_unlock(&ptr->mutex);
+        spin_unlock(&ptr->mutex);        //It check if the there is any write lock on the disk
         return -EBUSY;
     }
     
-    // Grab the lock!
     if(istmpfileWrt)
         ptr->num_write_locks++;
-    else // readable
+    else
         ptr->num_read_locks++;
     
-    // Add the process to the holder's list
     ptr->lock_holder_l = AddnodeFd(ptr->lock_holder_l, current->pid);
     
     spin_unlock(&ptr->mutex);
@@ -493,8 +469,6 @@ static int DriveidforWaiter (pid_t id)
             return x;
         }
     }
-    
-    // If we get here, we've visited the node before
     return -1;
 }
 
@@ -519,7 +493,7 @@ TheQueue_t* StartQueue (void)
     return ptr;
 }
 
-/* Returns 1 if the queue has elements, 0 if empty */
+
 bool isQueueEmpty (TheQueue_t *ptr)
 {
     if(ptr->head == NULL)
@@ -536,9 +510,7 @@ void PushQueue ( pid_t pi,TheQueue_t *tmp)
         tmp->tail = AddnodeEd(tmp->tail, pi)->next;
 }
 
-/**
- * Pops an element from the queue.
- */
+
 pid_t PopQueue (TheQueue_t *ptr)
 {
     pid_t num;
@@ -586,7 +558,7 @@ void AddnodefromListtoQueue ( vec_node *ptrhd,TheQueue_t *tmp)
 static bool check_deadlock (osprd_info_t *d)
 {
     TheQueue_t *q;
-    int i, d_id = drive_id_from_info(d);
+    int i, d_id = Drriveid(d);
     bool ret = false;
     pid_t pid = -1;
     
@@ -615,7 +587,6 @@ static bool check_deadlock (osprd_info_t *d)
         d_id = DriveidforWaiter(pid);
     }
     
-    // Clean up after checks
     for(i = 0; i < NOSPRD; i++)
     {
         spin_lock(&(osprds[i].mutex));
@@ -636,10 +607,10 @@ static bool check_deadlock (osprd_info_t *d)
 int osprd_ioctl(struct inode *inode, struct file *filp,
                 unsigned int cmd, unsigned long arg)
 {
-    osprd_info_t *d = file2osprd(filp);	// device info
-    int r = 0;			// return value: initially 0
+    osprd_info_t *d = file2osprd(filp);
+    int r = 0;
     
-    // Set 'r' to the ioctl's return value: 0 on success, negative on error
+    
     
     if (cmd == OSPRDIOCACQUIRE) {
         
@@ -684,9 +655,6 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         if(check_deadlock(d))
             return -EDEADLK;
         
-        // If we can't acquire the lock we put ourselves in the back of the queue
-        // when the lock is released ticket_head will be incremented and we'll be
-        // woken up
         while(RequestAcquireLock(filp) != 0)
         {
             spin_lock(&d->mutex);
@@ -701,34 +669,24 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             d->lock_waiter_l = RemoveNode(d->lock_waiter_l, current->pid);
             spin_unlock(&d->mutex);
             
-            // process any pending signals by re-queueing everything
             if(d->num_to_requeue > 0)
             {
-                // Note: do NOT wake threads here, each thread should requeue only ONCE
                 spin_lock(&d->mutex);
                 d->num_to_requeue--;
                 spin_unlock(&d->mutex);
                 
-                // If we find another pending signal, dispatch that too
                 if(signal_pending(current))
                     return -ERESTARTSYS;
             }
-            else if(signal_pending(current)) // See if we were woken up by a signal
+            else if(signal_pending(current)) // This check if we were woken up by a signal
             {
-                // For simplicity, we requeue all waiting tasks (-1 which
-                // is the process) being "popped" off the wait queue
                 spin_lock(&d->mutex);
                 d->num_to_requeue = (d->ticket_tail - d->ticket_head - 1);
                 d->ticket_head = 0;
                 d->ticket_tail = 0;
-                
-                // All threads are woken to notify them of requeuing
-                // meanwhile, we wait until that finishes (no need to check
-                // for more interrupts, the process will exit anyway).
                 wake_up_all(&d->blockq);
                 spin_unlock(&d->mutex);
                 
-                // Sanity check
                 if(d->num_to_requeue > 0)
                 {
                     wait_event(d->blockq, d->num_to_requeue == 0);
