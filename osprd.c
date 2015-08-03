@@ -292,6 +292,9 @@ static int RequestAcquireLock(struct file *filp);
  */
 static void osprd_process_request(osprd_info_t *d, struct request *req)
 {
+    size_t Offset;
+    
+    size_t Nobyte;
     
     
     if (!blk_fs_request(req)) {
@@ -310,24 +313,25 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     
     
     
-    if ( req->sector >= nsectors || req->sector < 0)
+    
+    if ( req->sector >= nsectors
+        || req->sector < 0)
     {
         // sector_t is defined as an unsigned long in <linux/types.h>
         eprintk("This is an in valid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
         end_request(req, 0);
     }
-    size_t Nobyte;
-    size_t Offset;
-    
     Offset = req->sector * SECTOR_SIZE;
+    
     
     // If the number of requested sectors would reach the end of the disk
     // use as many sectors as possible until the end is reached
     if(req->sector + req->current_nr_sectors > nsectors)
     {
-        Nobyte = (nsectors - req->sector) * SECTOR_SIZE;
+        Nobyte = SECTOR_SIZE* (nsectors - req->sector) ;
         
-        eprintk("The requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
+        eprintk("The requested sector [%lu] with [%u] additional sectors.\n",
+                (unsigned long)req->sector, req->current_nr_sectors);
         eprintk("Using [%u] additional sectors instead.\n", Nobyte / SECTOR_SIZE);
     }
     else
@@ -382,9 +386,10 @@ static int ReleaseLLock(struct file *tmpfile)
 {
     if (tmpfile) {
         osprd_info_t *d = file2osprd(tmpfile);
+        int tmp_locked = tmpfile->f_flags & F_OSPRD_LOCKED;
         
         int tmp_writable = tmpfile->f_mode & FMODE_WRITE;
-        int tmp_locked = tmpfile->f_flags & F_OSPRD_LOCKED;
+        
         
         if(tmp_locked)
         {
@@ -423,11 +428,10 @@ static int ReleaseLLock(struct file *tmpfile)
 
 static int RequestAcquireLock(struct file *tmpfile)
 {
-    osprd_info_t *d = file2osprd(tmpfile);
+    osprd_info_t *ptr = file2osprd(tmpfile);
     
-    int filp_writable = filp->f_mode & FMODE_WRITE;
+    int istmpfileWrt = tmpfile->f_mode & FMODE_WRITE;
     
-    // Check that this flag doesn't already have a lock
     if(filp->f_flags & F_OSPRD_LOCKED)
     {
         return -EDEADLK;
@@ -436,36 +440,39 @@ static int RequestAcquireLock(struct file *tmpfile)
     
     // We cannot grab the disk if there is any write lock
     // or if the caller wishes to write and someone else is reading
-    if(  (filp_writable && d->num_read_locks > 0) || d->num_write_locks > 0)
+    if(  (istmpfileWrt && ptr->num_read_locks > 0) || ptr->num_write_locks > 0)
     {
         spin_unlock(&d->mutex);
         return -EBUSY;
     }
     
     // Grab the lock!
-    if(filp_writable)
-        d->num_write_locks++;
+    if(istmpfileWrt)
+        ptr->num_write_locks++;
     else // readable
-        d->num_read_locks++;
+        ptr->num_read_locks++;
     
     // Add the process to the holder's list
-    d->lock_holder_l = AddnodeFd(d->lock_holder_l, current->pid);
+    ptr->lock_holder_l = AddnodeFd(ptr->lock_holder_l, current->pid);
     
-    spin_unlock(&d->mutex);
+    spin_unlock(&ptr->mutex);
     tmpfile->f_flags |= F_OSPRD_LOCKED;
     return 0;
 }
 
-static bool current_has_lock_on_disk (int d_id)
+static bool isDisknowlocked (int x)
 {
-    vec_node *result;
-    osprd_info_t *d = &osprds[d_id];
+    vec_node * flag;
+    osprd_info_t *tp = &osprds[x];
     
-    spin_lock(&d->mutex);
-    result = SearchNode( current->pid,d->lock_holder_l);
+    spin_lock(&tp->mutex);
+    
+    flag = SearchNode( current->pid,tp->lock_holder_l);
     spin_unlock(&d->mutex);
-    
-    return result ? true : false;
+    if(flag)
+        return true;
+    else
+        return false;
 }
 
 static int find_drive_id_for_waiter (pid_t p)
@@ -588,7 +595,7 @@ static bool check_deadlock (osprd_info_t *d)
         if(d_id > -1)
         {
             // Cannot lock the same disk twice
-            if(current_has_lock_on_disk(d_id))
+            if(isDisknowlocked(d_id))
             {
                 ret = true;
                 break;
