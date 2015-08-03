@@ -308,8 +308,8 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     // Consider the 'req->sector', 'req->current_nr_sectors', and
     // 'req->buffer' members, and the rq_data_dir() function.
     
-     size_t Nobyte;
-     size_t Offset;
+     size_t no_byte;
+     size_t off_set;
     
     if ( req->sector >= nsectors || req->sector < 0)
     {
@@ -319,29 +319,29 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     }
    
     
-    Offset = req->sector * SECTOR_SIZE;
+    off_set = req->sector * SECTOR_SIZE;
     
     // If the number of requested sectors would reach the end of the disk
     // use as many sectors as possible until the end is reached
     if(req->sector + req->current_nr_sectors > nsectors)
     {
-        Nobyte = (nsectors - req->sector) * SECTOR_SIZE;
+        no_byte = (nsectors - req->sector) * SECTOR_SIZE;
         
         eprintk("The requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
-        eprintk("Using [%u] additional sectors instead.\n", Nobyte / SECTOR_SIZE);
+        eprintk("Using [%u] additional sectors instead.\n", no_byte / SECTOR_SIZE);
     }
     else
     {
         size_t tp=req->current_nr_sectors * SECTOR_SIZE;
-        Nobyte=tp;
+        no_byte=tp;
     }
     
     spin_lock(&d->mutex);
     
     if(rq_data_dir(req) == READ)
-        memcpy(req->buffer, d->data + Offset, Nobyte);
+        memcpy(req->buffer, d->data + off_set, no_byte);
     else // WRITE
-        memcpy(d->data + Offset, req->buffer, Nobyte);
+        memcpy(d->data + off_set, req->buffer, no_byte);
     
     spin_unlock(&d->mutex);
     
