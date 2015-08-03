@@ -86,12 +86,8 @@ vec_node* SearchNode ( pid_t pi,vec_node *ptrhd)
     return NULL;
 }
 
-/**
- * Adds an element to the end of a list and returns a pointer
- * to the head. If the head argument is null, the new element
- * is returned.
- */
-vec_node* AddnodeEd (vec_node *ptrhd, pid_t pi)
+
+vec_node* AddnodeEd (vec_node *ptrhd, pid_t pi)    //This funtion add an note into the end of the list
 {
     vec_node *current_node = ptrhd;
     vec_node *new_node = Startlist(pi);
@@ -116,11 +112,8 @@ void MarkNodeVisted ( bool status,vec_node *ptrhd)
     }
 }
 
-/**
- * Creates a new element and set's its next pointer to the
- * specified head. Returns a pointer to the new element
- */
-vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)
+
+vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)   //This funtion create a new element inthe front
 {
     vec_node *tmpNode = Startlist(pi);
     tmpNode->next = ptrhd;
@@ -128,12 +121,8 @@ vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)
     return tmpNode;
 }
 
-/**
- * If an element is found with the specified pid value
- * that element is removed from the list and the list's head
- * (unchanged or new head) is returned
- */
-vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
+
+vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)    //This funtion remove an element from the list
 {
     vec_node *CurNode;
     vec_node *EdNode;
@@ -163,8 +152,7 @@ vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
         
         EdNode = CurNode;
     }
-    
-    // Element not found
+
     return ptrhd;
 }
 
@@ -299,15 +287,10 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     if ( req->sector >= nsectors
         || req->sector < 0)
     {
-        // sector_t is defined as an unsigned long in <linux/types.h>
         eprintk("This is an in valid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
         end_request(req, 0);
     }
     Offset = req->sector * SECTOR_SIZE;
-    
-    
-    // If the number of requested sectors would reach the end of the disk
-    // use as many sectors as possible until the end is reached
     if(req->sector + req->current_nr_sectors > nsectors)
     {
         Nobyte = SECTOR_SIZE* (nsectors - req->sector) ;
@@ -326,7 +309,7 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     
     if(rq_data_dir(req) == READ)
         memcpy(req->buffer, d->data + Offset, Nobyte);
-    else // WRITE
+    else
         memcpy(d->data + Offset, req->buffer, Nobyte);
     
     spin_unlock(&d->mutex);
