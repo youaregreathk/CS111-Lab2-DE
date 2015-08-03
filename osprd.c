@@ -5,9 +5,9 @@
 #include <linux/init.h>
 
 #include <linux/sched.h>
-#include <linux/kernel.h>  /* printk() */
-#include <linux/errno.h>   /* error codes */
-#include <linux/types.h>   /* size_t */
+#include <linux/kernel.h>
+#include <linux/errno.h>
+#include <linux/types.h>
 #include <linux/vmalloc.h>
 #include <linux/genhd.h>
 #include <linux/blkdev.h>
@@ -41,6 +41,9 @@ MODULE_AUTHOR("Phil Crumm and Ivan Petkov");
 
 #define OSPRD_MAJOR	222
 
+static int ReleaseLLock(struct file *tmpfile);
+static int RequestAcquireLock(struct file *filp);
+
 /* This module parameter controls how big the disk will be.
  * You can specify module parameters when you load the module,
  * as an argument to insmod: "insmod osprd.ko nsectors=4096" */
@@ -67,9 +70,7 @@ vec_node* Startlist (pid_t pi)
     return tmpNode;
 }
 
-/**
- * Returns 0 if the element is not found and 1 if it is
- */
+
 vec_node* SearchNode ( pid_t pi,vec_node *ptrhd)
 {
     if(ptrhd == NULL)
@@ -85,12 +86,8 @@ vec_node* SearchNode ( pid_t pi,vec_node *ptrhd)
     return NULL;
 }
 
-/**
- * Adds an element to the end of a list and returns a pointer
- * to the head. If the head argument is null, the new element
- * is returned.
- */
-vec_node* AddnodeEd (vec_node *ptrhd, pid_t pi)
+
+vec_node* AddnodeEd (vec_node *ptrhd, pid_t pi)    //This funtion add an node in the end of the list and return a pointer
 {
     vec_node *current_node = ptrhd;
     vec_node *new_node = Startlist(pi);
@@ -115,11 +112,8 @@ void MarkNodeVisted ( bool status,vec_node *ptrhd)
     }
 }
 
-/**
- * Creates a new element and set's its next pointer to the
- * specified head. Returns a pointer to the new element
- */
-vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)
+
+vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)   //This funtions add the new node in the font of the list
 {
     vec_node *tmpNode = Startlist(pi);
     tmpNode->next = ptrhd;
@@ -127,12 +121,8 @@ vec_node* AddnodeFd (vec_node *ptrhd, pid_t pi)
     return tmpNode;
 }
 
-/**
- * If an element is found with the specified pid value
- * that element is removed from the list and the list's head
- * (unchanged or new head) is returned
- */
-vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)
+
+vec_node* RemoveNode (vec_node *ptrhd, pid_t pi)    //This funtion remove node from the list
 {
     vec_node *CurNode;
     vec_node *EdNode;
@@ -232,13 +222,11 @@ static osprd_info_t osprds[NOSPRD];
  */
 static osprd_info_t *file2osprd(struct file *filp);
 
-/**
- * Given a file struct, returns the drive ID of the "file"
- */
-int drive_id_from_info (osprd_info_t *d)
+
+int DriveId (osprd_info_t *d)   //This helper funtion return the id of the disk
 {
-    int i;
-    for (i = 0; i < NOSPRD; i++)
+    int i=0;
+    for (; i < NOSPRD; i++)
     {
         if (&osprds[i] == d)
         {
@@ -247,7 +235,7 @@ int drive_id_from_info (osprd_info_t *d)
     }
     
     // If we get here, we have a serious problem
-    eprintk("Unrecognized device");
+    eprintk("The device is unrecognized ");
     return -1;
     
 }
@@ -264,35 +252,13 @@ static void for_each_open_file(struct task_struct *task,
                                                 osprd_info_t *user_data),
                                osprd_info_t *user_data);
 
-/**
- * Releases any read/write lock for a given file
- * and modifies the relevant osprd_info_t as appropriate and clears
- * F_OSPRD_LOCKED from filp->f_flags. If the file was locked, the entire
- * wait queue is woken up after the lock is removed.
- *
- * returns 0 on success
- * return -EINVAL if filp is NULL or is not locked
- */
-static int ReleaseLLock(struct file *tmpfile);
 
-/**
- * Tries to acquire a lock for a file given that there are no locking
- * conflicts with the disk.
- *
- * returns 0 on success
- * returns -EBUSY if another lock is already in place
- * returns -EDEADLK if the process already has a lock
- */
-static int RequestAcquireLock(struct file *filp);
 
-/*
- * osprd_process_request(d, req)
- *   Called when the user reads or writes a sector.
- *   Should perform the read or write, as appropriate.
- */
+
+
 static void osprd_process_request(osprd_info_t *d, struct request *req)
 {
-    size_t Offset;
+    size_t Offset;         //This funtion is called when the user reads or write in a sector, and perform read and write
     
     size_t Nobyte;
     
@@ -317,15 +283,11 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     if ( req->sector >= nsectors
         || req->sector < 0)
     {
-        // sector_t is defined as an unsigned long in <linux/types.h>
         eprintk("This is an in valid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
         end_request(req, 0);
     }
     Offset = req->sector * SECTOR_SIZE;
     
-    
-    // If the number of requested sectors would reach the end of the disk
-    // use as many sectors as possible until the end is reached
     if(req->sector + req->current_nr_sectors > nsectors)
     {
         Nobyte = SECTOR_SIZE* (nsectors - req->sector) ;
@@ -382,6 +344,17 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 /*
  * osprd_lock
  */
+
+/**
+ * Releases any read/write lock for a given file
+ * and modifies the relevant osprd_info_t as appropriate and clears
+ * F_OSPRD_LOCKED from filp->f_flags. If the file was locked, the entire
+ * wait queue is woken up after the lock is removed.
+ *
+ * returns 0 on success
+ * return -EINVAL if filp is NULL or is not locked
+ */
+
 static int ReleaseLLock(struct file *tmpfile)
 {
     if (tmpfile) {
@@ -426,6 +399,14 @@ static int ReleaseLLock(struct file *tmpfile)
     return -EINVAL;
 }
 
+/**
+ * Tries to acquire a lock for a file given that there are no locking
+ * conflicts with the disk.
+ *
+ * returns 0 on success
+ * returns -EBUSY if another lock is already in place
+ * returns -EDEADLK if the process already has a lock
+ */
 static int RequestAcquireLock(struct file *tmpfile)
 {
     osprd_info_t *ptr = file2osprd(tmpfile);
@@ -582,50 +563,52 @@ void AddnodefromListtoQueue ( vec_node *ptrhd,TheQueue_t *tmp)
 }
 
 //*******************************************************************************
-static bool check_deadlock (osprd_info_t *d)
+static bool Deaklock_Check (osprd_info_t *d)
 {
-    TheQueue_t *q;
-    int i, d_id = drive_id_from_info(d);
-    bool ret = false;
+    TheQueue_t *que;
+    bool flag = false;
+    
+    int tmpid = DriveId(d);
+    
     pid_t pid = -1;
     
-    q = StartQueue();
+    que = StartQueue();
     
     for(;;)
     {
-        if(d_id > -1)
+        if(tmpid > -1)
         {
             // Cannot lock the same disk twice
-            if(isDisknowlocked(d_id))
+            if(isDisknowlocked(tmpid))
             {
-                ret = true;
+                flag = true;
                 break;
             }
             
             spin_lock(&d->mutex);
-            AddnodefromListtoQueue( osprds[d_id].lock_holder_l,q);
+            AddnodefromListtoQueue( osprds[tmpid].lock_holder_l,que);
             spin_unlock(&d->mutex);
         }
         
-        if(isQueueEmpty(q))
+        if(isQueueEmpty(que))
             break;
         
-        pid = PopQueue(q);
-        d_id = DriveidforWaiter(pid);
+        pid = PopQueue(que);
+        tmpid = DriveidforWaiter(pid);
     }
     
     // Clean up after checks
-    for(i = 0; i < NOSPRD; i++)
+    int x=0;
+    for(; x < NOSPRD; x++)
     {
-        spin_lock(&(osprds[i].mutex));
-        MarkNodeVisted( false,osprds[i].lock_waiter_l);
-        spin_unlock(&(osprds[i].mutex));
+        spin_lock(&(osprds[x].mutex));
+        MarkNodeVisted( false,osprds[x].lock_waiter_l);
+        spin_unlock(&(osprds[x].mutex));
     }
     
-    FreeQueue(q);
-    kfree(q);
-    
-    return ret;
+    FreeQueue(que);
+    kfree(que);
+    return flag;
 }
 
 /*
@@ -680,7 +663,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         // Used to track the current request
         unsigned local_ticket;
         
-        if(check_deadlock(d))
+        if(Deaklock_Check(d))
             return -EDEADLK;
         
         // If we can't acquire the lock we put ourselves in the back of the queue
@@ -693,8 +676,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
             local_ticket = d->ticket_tail;
             d->lock_waiter_l = AddnodeFd(d->lock_waiter_l, current->pid);
             spin_unlock(&d->mutex);
-            
-            wait_event_interruptible(d->blockq, d->ticket_head == local_ticket || d->num_to_requeue > 0);
+            wait_event_interruptible(  d->num_to_requeue > 0 || d->blockq, d->ticket_head == local_ticket);
             
             spin_lock(&d->mutex);
             d->lock_waiter_l = RemoveNode(d->lock_waiter_l, current->pid);
@@ -751,247 +733,248 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         r = RequestAcquireLock(filp);
         
         if(r == -EDEADLK)
+        {
             r = -EBUSY;
-        
-    } else if (cmd == OSPRDIOCRELEASE) {
-        
-        // EXERCISE: Unlock the ramdisk.
-        //
-        // If the file hasn't locked the ramdisk, return -EINVAL.
-        // Otherwise, clear the lock from filp->f_flags, wake up
-        // the wait queue, perform any additional accounting steps
-        // you need, and return 0.
-        
-        r = ReleaseLLock(filp);
-        
-    } else
-        r = -ENOTTY; /* unknown command */
-    return r;
-}
-
-
-// Initialize internal fields for an osprd_info_t.
-
-static void osprd_setup(osprd_info_t *d)
-{
-    /* Initialize the wait queue. */
-    init_waitqueue_head(&d->blockq);
-    osp_spin_lock_init(&d->mutex);
-    d->ticket_head = d->ticket_tail = 0;
-    /* Add code here if you add fields to osprd_info_t. */
-    
-    d->num_read_locks = 0;
-    d->num_write_locks = 0;
-    d->num_to_requeue = 0;
-    
-    d->lock_holder_l = NULL;
-    d->lock_waiter_l = NULL;
-}
-
-
-/*****************************************************************************/
-/*         THERE IS NO NEED TO UNDERSTAND ANY CODE BELOW THIS LINE!          */
-/*                                                                           */
-/*****************************************************************************/
-
-// Process a list of requests for a osprd_info_t.
-// Calls osprd_process_request for each element of the queue.
-
-static void osprd_process_request_queue(request_queue_t *q)
-{
-    osprd_info_t *d = (osprd_info_t *) q->queuedata;
-    struct request *req;
-    
-    while ((req = elv_next_request(q)) != NULL)
-        osprd_process_request(d, req);
-}
-
-
-// Some particularly horrible stuff to get around some Linux issues:
-// the Linux block device interface doesn't let a block device find out
-// which file has been closed.  We need this information.
-
-static struct file_operations osprd_blk_fops;
-static int (*blkdev_release)(struct inode *, struct file *);
-
-static int _osprd_release(struct inode *inode, struct file *filp)
-{
-    if (file2osprd(filp))
-        osprd_close_last(inode, filp);
-    return (*blkdev_release)(inode, filp);
-}
-
-static int _osprd_open(struct inode *inode, struct file *filp)
-{
-    if (!osprd_blk_fops.open) {
-        memcpy(&osprd_blk_fops, filp->f_op, sizeof(osprd_blk_fops));
-        blkdev_release = osprd_blk_fops.release;
-        osprd_blk_fops.release = _osprd_release;
+            
+        } else if (cmd == OSPRDIOCRELEASE) {
+            
+            // EXERCISE: Unlock the ramdisk.
+            //
+            // If the file hasn't locked the ramdisk, return -EINVAL.
+            // Otherwise, clear the lock from filp->f_flags, wake up
+            // the wait queue, perform any additional accounting steps
+            // you need, and return 0.
+            
+            r = ReleaseLLock(filp);
+            
+        } else
+            r = -ENOTTY; /* unknown command */
+        return r;
     }
-    filp->f_op = &osprd_blk_fops;
-    return osprd_open(inode, filp);
-}
-
-
-// The device operations structure.
-
-static struct block_device_operations osprd_ops = {
-    .owner = THIS_MODULE,
-    .open = _osprd_open,
-    // .release = osprd_release, // we must call our own release
-    .ioctl = osprd_ioctl
-};
-
-
-// Given an open file, check whether that file corresponds to an OSP ramdisk.
-// If so, return a pointer to the ramdisk's osprd_info_t.
-// If not, return NULL.
-
-static osprd_info_t *file2osprd(struct file *filp)
-{
-    if (filp) {
-        struct inode *ino = filp->f_dentry->d_inode;
-        if (ino->i_bdev
-            && ino->i_bdev->bd_disk
-            && ino->i_bdev->bd_disk->major == OSPRD_MAJOR
-            && ino->i_bdev->bd_disk->fops == &osprd_ops)
-            return (osprd_info_t *) ino->i_bdev->bd_disk->private_data;
-    }
-    return NULL;
-}
-
-
-// Call the function 'callback' with data 'user_data' for each of 'task's
-// open files.
-
-static void for_each_open_file(struct task_struct *task,
-                               void (*callback)(struct file *filp, osprd_info_t *user_data),
-                               osprd_info_t *user_data)
-{
-    int fd;
-    task_lock(task);
-    spin_lock(&task->files->file_lock);
+    
+    
+    // Initialize internal fields for an osprd_info_t.
+    
+    static void osprd_setup(osprd_info_t *d)
     {
+        /* Initialize the wait queue. */
+        init_waitqueue_head(&d->blockq);
+        osp_spin_lock_init(&d->mutex);
+        d->ticket_head = d->ticket_tail = 0;
+        /* Add code here if you add fields to osprd_info_t. */
+        
+        d->num_read_locks = 0;
+        d->num_write_locks = 0;
+        d->num_to_requeue = 0;
+        
+        d->lock_holder_l = NULL;
+        d->lock_waiter_l = NULL;
+    }
+    
+    
+    /*****************************************************************************/
+    /*         THERE IS NO NEED TO UNDERSTAND ANY CODE BELOW THIS LINE!          */
+    /*                                                                           */
+    /*****************************************************************************/
+    
+    // Process a list of requests for a osprd_info_t.
+    // Calls osprd_process_request for each element of the queue.
+    
+    static void osprd_process_request_queue(request_queue_t *q)
+    {
+        osprd_info_t *d = (osprd_info_t *) q->queuedata;
+        struct request *req;
+        
+        while ((req = elv_next_request(q)) != NULL)
+            osprd_process_request(d, req);
+    }
+    
+    
+    // Some particularly horrible stuff to get around some Linux issues:
+    // the Linux block device interface doesn't let a block device find out
+    // which file has been closed.  We need this information.
+    
+    static struct file_operations osprd_blk_fops;
+    static int (*blkdev_release)(struct inode *, struct file *);
+    
+    static int _osprd_release(struct inode *inode, struct file *filp)
+    {
+        if (file2osprd(filp))
+            osprd_close_last(inode, filp);
+        return (*blkdev_release)(inode, filp);
+    }
+    
+    static int _osprd_open(struct inode *inode, struct file *filp)
+    {
+        if (!osprd_blk_fops.open) {
+            memcpy(&osprd_blk_fops, filp->f_op, sizeof(osprd_blk_fops));
+            blkdev_release = osprd_blk_fops.release;
+            osprd_blk_fops.release = _osprd_release;
+        }
+        filp->f_op = &osprd_blk_fops;
+        return osprd_open(inode, filp);
+    }
+    
+    
+    // The device operations structure.
+    
+    static struct block_device_operations osprd_ops = {
+        .owner = THIS_MODULE,
+        .open = _osprd_open,
+        // .release = osprd_release, // we must call our own release
+        .ioctl = osprd_ioctl
+    };
+    
+    
+    // Given an open file, check whether that file corresponds to an OSP ramdisk.
+    // If so, return a pointer to the ramdisk's osprd_info_t.
+    // If not, return NULL.
+    
+    static osprd_info_t *file2osprd(struct file *filp)
+    {
+        if (filp) {
+            struct inode *ino = filp->f_dentry->d_inode;
+            if (ino->i_bdev
+                && ino->i_bdev->bd_disk
+                && ino->i_bdev->bd_disk->major == OSPRD_MAJOR
+                && ino->i_bdev->bd_disk->fops == &osprd_ops)
+                return (osprd_info_t *) ino->i_bdev->bd_disk->private_data;
+        }
+        return NULL;
+    }
+    
+    
+    // Call the function 'callback' with data 'user_data' for each of 'task's
+    // open files.
+    
+    static void for_each_open_file(struct task_struct *task,
+                                   void (*callback)(struct file *filp, osprd_info_t *user_data),
+                                   osprd_info_t *user_data)
+    {
+        int fd;
+        task_lock(task);
+        spin_lock(&task->files->file_lock);
+        {
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 13)
-        struct files_struct *f = task->files;
+            struct files_struct *f = task->files;
 #else
-        struct fdtable *f = task->files->fdt;
+            struct fdtable *f = task->files->fdt;
 #endif
-        for (fd = 0; fd < f->max_fds; fd++)
-            if (f->fd[fd])
-                (*callback)(f->fd[fd], user_data);
-    }
-    spin_unlock(&task->files->file_lock);
-    task_unlock(task);
-}
-
-
-// Destroy a osprd_info_t.
-
-static void cleanup_device(osprd_info_t *d)
-{
-    wake_up_all(&d->blockq);
-    if (d->gd) {
-        del_gendisk(d->gd);
-        put_disk(d->gd);
-    }
-    if (d->queue)
-        blk_cleanup_queue(d->queue);
-    if (d->data)
-        vfree(d->data);
-    
-    FreeList(d->lock_holder_l);
-    FreeList(d->lock_waiter_l);
-    d->lock_holder_l = NULL;
-    d->lock_waiter_l = NULL;
-}
-
-
-// Initialize a osprd_info_t.
-
-static int setup_device(osprd_info_t *d, int which)
-{
-    memset(d, 0, sizeof(osprd_info_t));
-    
-    /* Get memory to store the actual block data. */
-    if (!(d->data = vmalloc(nsectors * SECTOR_SIZE)))
-        return -1;
-    memset(d->data, 0, nsectors * SECTOR_SIZE);
-    
-    /* Set up the I/O queue. */
-    spin_lock_init(&d->qlock);
-    if (!(d->queue = blk_init_queue(osprd_process_request_queue, &d->qlock)))
-        return -1;
-    blk_queue_hardsect_size(d->queue, SECTOR_SIZE);
-    d->queue->queuedata = d;
-    
-    /* The gendisk structure. */
-    if (!(d->gd = alloc_disk(1)))
-        return -1;
-    d->gd->major = OSPRD_MAJOR;
-    d->gd->first_minor = which;
-    d->gd->fops = &osprd_ops;
-    d->gd->queue = d->queue;
-    d->gd->private_data = d;
-    snprintf(d->gd->disk_name, 32, "osprd%c", which + 'a');
-    set_capacity(d->gd, nsectors);
-    add_disk(d->gd);
-    
-    /* Call the setup function. */
-    osprd_setup(d);
-    
-    return 0;
-}
-
-static void osprd_exit(void);
-
-
-// The kernel calls this function when the module is loaded.
-// It initializes the 4 osprd block devices.
-
-static int __init osprd_init(void)
-{
-    int i, r;
-    
-    // shut up the compiler
-    (void) for_each_open_file;
-#ifndef osp_spin_lock
-    (void) osp_spin_lock;
-    (void) osp_spin_unlock;
-#endif
-    
-    /* Register the block device name. */
-    if (register_blkdev(OSPRD_MAJOR, "osprd") < 0) {
-        printk(KERN_WARNING "osprd: unable to get major number\n");
-        return -EBUSY;
+            for (fd = 0; fd < f->max_fds; fd++)
+                if (f->fd[fd])
+                    (*callback)(f->fd[fd], user_data);
+        }
+        spin_unlock(&task->files->file_lock);
+        task_unlock(task);
     }
     
-    /* Initialize the device structures. */
-    for (i = r = 0; i < NOSPRD; i++)
-        if (setup_device(&osprds[i], i) < 0)
-            r = -EINVAL;
     
-    if (r < 0) {
-        printk(KERN_EMERG "osprd: can't set up device structures\n");
-        osprd_exit();
-        return -EBUSY;
-    } else
+    // Destroy a osprd_info_t.
+    
+    static void cleanup_device(osprd_info_t *d)
+    {
+        wake_up_all(&d->blockq);
+        if (d->gd) {
+            del_gendisk(d->gd);
+            put_disk(d->gd);
+        }
+        if (d->queue)
+            blk_cleanup_queue(d->queue);
+        if (d->data)
+            vfree(d->data);
+        
+        FreeList(d->lock_holder_l);
+        FreeList(d->lock_waiter_l);
+        d->lock_holder_l = NULL;
+        d->lock_waiter_l = NULL;
+    }
+    
+    
+    // Initialize a osprd_info_t.
+    
+    static int setup_device(osprd_info_t *d, int which)
+    {
+        memset(d, 0, sizeof(osprd_info_t));
+        
+        /* Get memory to store the actual block data. */
+        if (!(d->data = vmalloc(nsectors * SECTOR_SIZE)))
+            return -1;
+        memset(d->data, 0, nsectors * SECTOR_SIZE);
+        
+        /* Set up the I/O queue. */
+        spin_lock_init(&d->qlock);
+        if (!(d->queue = blk_init_queue(osprd_process_request_queue, &d->qlock)))
+            return -1;
+        blk_queue_hardsect_size(d->queue, SECTOR_SIZE);
+        d->queue->queuedata = d;
+        
+        /* The gendisk structure. */
+        if (!(d->gd = alloc_disk(1)))
+            return -1;
+        d->gd->major = OSPRD_MAJOR;
+        d->gd->first_minor = which;
+        d->gd->fops = &osprd_ops;
+        d->gd->queue = d->queue;
+        d->gd->private_data = d;
+        snprintf(d->gd->disk_name, 32, "osprd%c", which + 'a');
+        set_capacity(d->gd, nsectors);
+        add_disk(d->gd);
+        
+        /* Call the setup function. */
+        osprd_setup(d);
+        
         return 0;
-}
-
-
-// The kernel calls this function to unload the osprd module.
-// It destroys the osprd devices.
-
-static void osprd_exit(void)
-{
-    int i;
-    for (i = 0; i < NOSPRD; i++)
-        cleanup_device(&osprds[i]);
-    unregister_blkdev(OSPRD_MAJOR, "osprd");
-}
-
-
-// Tell Linux to call those functions at init and exit time.
-module_init(osprd_init);
-module_exit(osprd_exit);
+    }
+    
+    static void osprd_exit(void);
+    
+    
+    // The kernel calls this function when the module is loaded.
+    // It initializes the 4 osprd block devices.
+    
+    static int __init osprd_init(void)
+    {
+        int i, r;
+        
+        // shut up the compiler
+        (void) for_each_open_file;
+#ifndef osp_spin_lock
+        (void) osp_spin_lock;
+        (void) osp_spin_unlock;
+#endif
+        
+        /* Register the block device name. */
+        if (register_blkdev(OSPRD_MAJOR, "osprd") < 0) {
+            printk(KERN_WARNING "osprd: unable to get major number\n");
+            return -EBUSY;
+        }
+        
+        /* Initialize the device structures. */
+        for (i = r = 0; i < NOSPRD; i++)
+            if (setup_device(&osprds[i], i) < 0)
+                r = -EINVAL;
+        
+        if (r < 0) {
+            printk(KERN_EMERG "osprd: can't set up device structures\n");
+            osprd_exit();
+            return -EBUSY;
+        } else
+            return 0;
+    }
+    
+    
+    // The kernel calls this function to unload the osprd module.
+    // It destroys the osprd devices.
+    
+    static void osprd_exit(void)
+    {
+        int i;
+        for (i = 0; i < NOSPRD; i++)
+            cleanup_device(&osprds[i]);
+        unregister_blkdev(OSPRD_MAJOR, "osprd");
+    }
+    
+    
+    // Tell Linux to call those functions at init and exit time.
+    module_init(osprd_init);
+    module_exit(osprd_exit);
