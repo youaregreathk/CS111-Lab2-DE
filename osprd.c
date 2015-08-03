@@ -273,7 +273,7 @@ static void for_each_open_file(struct task_struct *task,
  * returns 0 on success
  * return -EINVAL if filp is NULL or is not locked
  */
-static int ReleaseLLock(struct file *filp);
+static int ReleaseLLock(struct file *tmpfile);
 
 /**
  * Tries to acquire a lock for a file given that there are no locking
@@ -283,7 +283,7 @@ static int ReleaseLLock(struct file *filp);
  * returns -EBUSY if another lock is already in place
  * returns -EDEADLK if the process already has a lock
  */
-static int try_acquire_file_lock(struct file *filp);
+static int RequestAcquireLock(struct file *filp);
 
 /*
  * osprd_process_request(d, req)
@@ -292,13 +292,13 @@ static int try_acquire_file_lock(struct file *filp);
  */
 static void osprd_process_request(osprd_info_t *d, struct request *req)
 {
-    size_t offset;
-    size_t num_bytes;
+    
     
     if (!blk_fs_request(req)) {
         end_request(req, 0);
         return;
     }
+    
     
     // EXERCISE: Perform the read or write request by copying data between
     // our data array and the request's buffer.
@@ -308,41 +308,40 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     // Consider the 'req->sector', 'req->current_nr_sectors', and
     // 'req->buffer' members, and the rq_data_dir() function.
     
-    if (req->sector < 0 || req->sector >= nsectors)
+    
+    
+    if ( req->sector >= nsectors || req->sector < 0)
     {
         // sector_t is defined as an unsigned long in <linux/types.h>
-        eprintk("Invalid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
+        eprintk("This is an in valid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
         end_request(req, 0);
     }
+    size_t Nobyte;
+    size_t Offset;
     
-    offset = req->sector * SECTOR_SIZE;
+    Offset = req->sector * SECTOR_SIZE;
     
     // If the number of requested sectors would reach the end of the disk
     // use as many sectors as possible until the end is reached
     if(req->sector + req->current_nr_sectors > nsectors)
     {
-        num_bytes = (nsectors - req->sector) * SECTOR_SIZE;
-        eprintk("Requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
-        eprintk("Using [%u] additional sectors instead.\n", num_bytes / SECTOR_SIZE);
+        Nobyte = (nsectors - req->sector) * SECTOR_SIZE;
+        
+        eprintk("The requested sector [%lu] with [%u] additional sectors.\n", (unsigned long)req->sector, req->current_nr_sectors);
+        eprintk("Using [%u] additional sectors instead.\n", Nobyte / SECTOR_SIZE);
     }
     else
     {
-        num_bytes = req->current_nr_sectors * SECTOR_SIZE;
+        size_t tp=req->current_nr_sectors * SECTOR_SIZE;
+        Nobyte=tp;
     }
     
-    // According to http://www.makelinux.net/ldd3/chp-16-sect-3
-    // it is save to dereference req->buffer and write to it.
-    
-    // Note from @ipetkov: I'm not sure if req->buffer needs to
-    // be resized at all, I'm assuming linux will allocate the
-    // memory before the request is sent. No issues are apparent
-    // from the first 8 default test cases.
     spin_lock(&d->mutex);
     
     if(rq_data_dir(req) == READ)
-        memcpy(req->buffer, d->data + offset, num_bytes);
+        memcpy(req->buffer, d->data + Offset, Nobyte);
     else // WRITE
-        memcpy(d->data + offset, req->buffer, num_bytes);
+        memcpy(d->data + Offset, req->buffer, Nobyte);
     
     spin_unlock(&d->mutex);
     
@@ -422,20 +421,22 @@ static int ReleaseLLock(struct file *tmpfile)
     return -EINVAL;
 }
 
-static int try_acquire_file_lock(struct file *filp)
+static int RequestAcquireLock(struct file *tmpfile)
 {
-    osprd_info_t *d = file2osprd(filp);
+    osprd_info_t *d = file2osprd(tmpfile);
+    
     int filp_writable = filp->f_mode & FMODE_WRITE;
     
     // Check that this flag doesn't already have a lock
     if(filp->f_flags & F_OSPRD_LOCKED)
+    {
         return -EDEADLK;
-    
+    }
     spin_lock(&d->mutex);
     
     // We cannot grab the disk if there is any write lock
     // or if the caller wishes to write and someone else is reading
-    if(d->num_write_locks > 0 || (filp_writable && d->num_read_locks > 0))
+    if(  (filp_writable && d->num_read_locks > 0) || d->num_write_locks > 0)
     {
         spin_unlock(&d->mutex);
         return -EBUSY;
@@ -451,7 +452,7 @@ static int try_acquire_file_lock(struct file *filp)
     d->lock_holder_l = AddnodeFd(d->lock_holder_l, current->pid);
     
     spin_unlock(&d->mutex);
-    filp->f_flags |= F_OSPRD_LOCKED;
+    tmpfile->f_flags |= F_OSPRD_LOCKED;
     return 0;
 }
 
@@ -677,7 +678,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         // If we can't acquire the lock we put ourselves in the back of the queue
         // when the lock is released ticket_head will be incremented and we'll be
         // woken up
-        while(try_acquire_file_lock(filp) != 0)
+        while(RequestAcquireLock(filp) != 0)
         {
             spin_lock(&d->mutex);
             d->ticket_tail++;
@@ -739,7 +740,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         // OSPRDIOCTRYACQUIRE should return -EBUSY.
         // Otherwise, if we can grant the lock request, return 0.
         
-        r = try_acquire_file_lock(filp);
+        r = RequestAcquireLock(filp);
         
         if(r == -EDEADLK)
             r = -EBUSY;
