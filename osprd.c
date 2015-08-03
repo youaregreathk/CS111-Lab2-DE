@@ -46,7 +46,8 @@ MODULE_AUTHOR("Phil Crumm and Ivan Petkov");
  * as an argument to insmod: "insmod osprd.ko nsectors=4096" */
 static int nsectors = 32;
 module_param(nsectors, int, 0);
-
+static int ReleaseLLock(struct file *tmpfile);
+static int RequestAcquireLock(struct file *filp);
 /*********************************************************************************
  The Linklist Implementation
  
@@ -273,7 +274,7 @@ static void for_each_open_file(struct task_struct *task,
  * returns 0 on success
  * return -EINVAL if filp is NULL or is not locked
  */
-static int ReleaseLLock(struct file *tmpfile);
+
 
 /**
  * Tries to acquire a lock for a file given that there are no locking
@@ -283,7 +284,7 @@ static int ReleaseLLock(struct file *tmpfile);
  * returns -EBUSY if another lock is already in place
  * returns -EDEADLK if the process already has a lock
  */
-static int RequestAcquireLock(struct file *filp);
+
 
 /*
  * osprd_process_request(d, req)
