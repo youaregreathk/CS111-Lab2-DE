@@ -104,19 +104,19 @@ static osprd_info_t *file2osprd(struct file *filp);
 /**
  * Given a file struct, returns the drive ID of the "file"
  */
-int drive_id_from_info (osprd_info_t *d)
+int DriveId (osprd_info_t *d)
 {
-    int i;
-    for (i = 0; i < NOSPRD; i++)
+    int x=0;
+    for (; x < NOSPRD; x++)
     {
-        if (&osprds[i] == d)
+        if (&osprds[x] == d)
         {
-            return i;
+            return x;
         }
     }
     
     // If we get here, we have a serious problem
-    eprintk("Unrecognized device");
+    eprintk("The device is unrecognized");
     return -1;
     
 }
@@ -142,7 +142,7 @@ static void for_each_open_file(struct task_struct *task,
  * returns 0 on success
  * return -EINVAL if filp is NULL or is not locked
  */
-static int release_file_lock(struct file *filp);
+static int Release_LLock(struct file *filp);
 
 /**
  * Tries to acquire a lock for a file given that there are no locking
@@ -239,7 +239,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
     // a lock, release the lock.  Also wake up blocked processes
     // as appropriate.
     
-    release_file_lock(filp);
+    Release_LLock(filp);
     
     return 0;
 }
@@ -248,12 +248,12 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 /*
  * osprd_lock
  */
-static int release_file_lock(struct file *filp)
+static int Release_LLock(struct file *tmpfile)
 {
-    if (filp) {
-        osprd_info_t *d = file2osprd(filp);
-        int filp_writable = filp->f_mode & FMODE_WRITE;
-        int filp_locked = filp->f_flags & F_OSPRD_LOCKED;
+    if (tmpfile) {
+        osprd_info_t *d = file2osprd(tmpfile);
+        int filp_writable = tmpfile->f_mode & FMODE_WRITE;
+        int filp_locked = tmpfile->f_flags & F_OSPRD_LOCKED;
         
         if(filp_locked)
         {
@@ -275,7 +275,7 @@ static int release_file_lock(struct file *filp)
             spin_unlock(&d->mutex);
             
             // Clear the file's locked bit
-            filp->f_flags &= ~F_OSPRD_LOCKED;
+            tmpfile->f_flags &= ~F_OSPRD_LOCKED;
             
             wake_up_all(&d->blockq);
             return 0;
@@ -570,7 +570,7 @@ void AddnodefromListtoQueue ( vec_node *ptrhd,TheQueue_t *tmp)
 static bool check_deadlock (osprd_info_t *d)
 {
     TheQueue_t *q;
-    int i, d_id = drive_id_from_info(d);
+    int i, d_id = DriveId(d);
     bool ret = false;
     pid_t pid = -1;
     
@@ -747,7 +747,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
         // the wait queue, perform any additional accounting steps
         // you need, and return 0.
         
-        r = release_file_lock(filp);
+        r = Release_LLock(filp);
         
     } else
         r = -ENOTTY; /* unknown command */
