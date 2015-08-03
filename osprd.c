@@ -442,7 +442,7 @@ static int RequestAcquireLock(struct file *tmpfile)
     // or if the caller wishes to write and someone else is reading
     if(  (istmpfileWrt && ptr->num_read_locks > 0) || ptr->num_write_locks > 0)
     {
-        spin_unlock(&d->mutex);
+        spin_unlock(&ptr->mutex);
         return -EBUSY;
     }
     
