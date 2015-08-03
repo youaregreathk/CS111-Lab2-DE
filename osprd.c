@@ -308,7 +308,8 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
     // Consider the 'req->sector', 'req->current_nr_sectors', and
     // 'req->buffer' members, and the rq_data_dir() function.
     
-    
+     size_t Nobyte;
+     size_t Offset;
     
     if ( req->sector >= nsectors || req->sector < 0)
     {
@@ -316,8 +317,7 @@ static void osprd_process_request(osprd_info_t *d, struct request *req)
         eprintk("This is an in valid sector requested: [%lu]. max sectors: [%i]\n", (unsigned long)req->sector, nsectors);
         end_request(req, 0);
     }
-    size_t Nobyte;
-    size_t Offset;
+   
     
     Offset = req->sector * SECTOR_SIZE;
     
@@ -425,10 +425,10 @@ static int RequestAcquireLock(struct file *tmpfile)
 {
     osprd_info_t *d = file2osprd(tmpfile);
     
-    int filp_writable = filp->f_mode & FMODE_WRITE;
+    int filp_writable = tmpfile->f_mode & FMODE_WRITE;
     
     // Check that this flag doesn't already have a lock
-    if(filp->f_flags & F_OSPRD_LOCKED)
+    if(tmpfile->f_flags & F_OSPRD_LOCKED)
     {
         return -EDEADLK;
     }
