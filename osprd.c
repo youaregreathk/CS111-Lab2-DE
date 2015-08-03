@@ -432,17 +432,17 @@ static int RequestAcquireLock(struct file *tmpfile)
     
     int istmpfileWrt = tmpfile->f_mode & FMODE_WRITE;
     
-    if(filp->f_flags & F_OSPRD_LOCKED)
+    if(tmpfile->f_flags & F_OSPRD_LOCKED)
     {
         return -EDEADLK;
     }
-    spin_lock(&d->mutex);
+    spin_lock(&ptr->mutex);
     
     // We cannot grab the disk if there is any write lock
     // or if the caller wishes to write and someone else is reading
     if(  (istmpfileWrt && ptr->num_read_locks > 0) || ptr->num_write_locks > 0)
     {
-        spin_unlock(&d->mutex);
+        spin_unlock(&ptr->mutex);
         return -EBUSY;
     }
     
@@ -468,27 +468,28 @@ static bool isDisknowlocked (int x)
     spin_lock(&tp->mutex);
     
     flag = SearchNode( current->pid,tp->lock_holder_l);
-    spin_unlock(&d->mutex);
+    spin_unlock(&tp->mutex);
     if(flag)
         return true;
     else
         return false;
 }
 
-static int find_drive_id_for_waiter (pid_t p)
+static int DriveidforWaiter (pid_t id)
 {
-    int i;
+    int x=0;
     vec_node *elem = NULL;
-    for(i = 0; i < NOSPRD; i++)
+    
+    for(; x < NOSPRD; x++)
     {
-        spin_lock(&(osprds[i].mutex));
-        elem = SearchNode( p,osprds[i].lock_waiter_l);
-        spin_unlock(&(osprds[i].mutex));
+        spin_lock(&(osprds[x].mutex));
+        elem = SearchNode( id,osprds[x].lock_waiter_l);
+        spin_unlock(&(osprds[x].mutex));
         
         if(elem && elem->visited == false)
         {
             elem->visited = true;
-            return i;
+            return x;
         }
     }
     
@@ -610,7 +611,7 @@ static bool check_deadlock (osprd_info_t *d)
             break;
         
         pid = PopQueue(q);
-        d_id = find_drive_id_for_waiter(pid);
+        d_id = DriveidforWaiter(pid);
     }
     
     // Clean up after checks
